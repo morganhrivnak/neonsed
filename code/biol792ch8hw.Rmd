@@ -1,0 +1,82 @@
+---
+title: "biol792ch8hw"
+author: "morgan hrivnak"
+date: "2024-10-09"
+output: html_document
+---
+8E1. 
+     (1) heat
+     (2) location where you go to school
+     (3) fuel efficiency in car
+     
+8E2.
+The first explanation is in an interaction between onions and low heat. For the onions to brown it is dependent on the onions not drying out, the other situations imply the influence of something else like the other parts of a car and the fourth interaction uses the word "or" implying that it could be one or the other or both. 
+
+8E3.
+(1)"carmelized" mu= alpha + beta(heat) * heat + beta(dry) *dry + beta (heatdry)* heat * dry
+(2) "maximum speed" mu= alpha + beta (cyl) *cyl + beta(inj) * inj
+(3) "conservative" mu= alpha + beta(friend) + friend + beta(parent) * parent
+(4)"intelligence" mu= alpha + beta(social) * social + beta(pendage) * pendage
+
+8M1. 
+This change might not be linear because this change is not an additive change, raising the tmerpature of the greenhouse preveneted all blooms not just some. This is not a linear reaction but is still a three-way interaction. Water and shade are dependent on one another while temperature interacts with everything. 
+
+8M2.
+µi = L(1 − H)
+
+8M3. 
+```{r}
+library(rethinking)
+library(tidyverse)
+
+N <- 1e5 # simulation size
+rPW <- 0.2 # correlation between prey and wolf
+bP <- 0.05 # regression coefficient for prey
+bW <- -0.3 # regression coefficient for wolf
+bPW <- 0.2 # regression coefficient for prey-by-wolf interaction
+
+# Simulate data
+prey <- as.integer(rnorm(N, mean = 100, sd = 15)) # as.integer, so we have "whole" animals
+wolves <- as.integer(rnorm(N, mean = 10 + rPW * prey, sd = 7))
+ravens <- as.integer(rnorm(N, mean = 5 + bP * prey + bW * wolves + bPW * wolves * prey, sd = 9))
+d <- data.frame(prey = prey, wolves = wolves, ravens = ravens)
+# plot the data
+par(mfrow = c(1, 2))
+plot(ravens ~ prey, data = d, main = "Ravens like prey!")
+plot(ravens ~ wolves, data = d, main = "Ravens like wolves?")
+```
+
+There isn't anything explaining why there are more ravens than wolves in a region. There needs to be something else at play that explains why you can predict the population size of ravens and wolves. 
+
+8M4. 
+```{r}
+library(rethinking)
+
+data(tulips)
+d <- tulips
+
+d$bed_id <- coerce_index(d$bed)
+d$blooms_std <- d$blooms / max(d$blooms) #scale from 0 to 1
+d$shade_cent <- d$shade - mean(d$shade) #scale from -1 to 1
+d$water_cent <- d$water - mean(d$water) #scale from -1 to 1
+
+set.seed(20) 
+m.4 <- quap(alist(
+  blooms ~ dnorm(mu, sigma),
+  mu <- a[bed_id] + bW * water_cent + bS * shade_cent + bWS * water_cent * shade_cent,
+  a[bed_id] ~ dnorm(130, 100),
+  bW ~ dnorm(0, 100),
+  bS ~ dnorm(0, 100),
+  bWS ~ dnorm(0, 100),
+  sigma ~ dunif(0, 100)
+),
+data = d
+)
+precis(m.4, depth = 2)
+
+```
+There is a difference but this difference has a lot of probability on both sides of zero. This means that this probability when positive refers to an event being true given new evidence while when it is a negative it is the probability of an event being false given new evidence. 
+
+
+
+

@@ -1,0 +1,95 @@
+0---
+title: "biol792individualanalysis2"
+author: "morgan hrivnak"
+date: "2024-10-24"
+output: html_document
+---
+Interactions and Model Comparison
+
+```{r}
+library(rethinking)
+library(tidyverse)
+library(dplyr)
+library(raster)
+library(here)
+
+df <- readRDS(here("alldata_wrangled.rds"))
+
+#assign non-numerical for percent_lessorequal
+df$percent_lessorequal <- as.numeric(df$percent_lessorequal)
+#filter out NA values
+df_clean <- df %>%
+  filter(!is.na(percent_lessorequal))
+#select CARI and MCDI site
+selected_sites <- df_clean %>%
+  filter(site %in% c("MCDI", "CARI"))
+print(selected_sites)
+#standardize selected sites
+sites_standard <- selected_sites %>%
+  mutate(across(where(is.numeric), scale))
+head(sites_standard)
+
+#make variable into index
+sites_standard$cid <-ifelse(sites_standard$site == "MCDI", 1, 2)
+
+#main meat
+mod1 <- quap(
+  alist(
+    size ~ dnorm(mu, sigma), 
+    mu <- a + bP*percent ,
+    a ~ dnorm(0, 1) ,
+    bP ~ dnorm(0, 1) ,
+    sigma ~ dexp(.1)
+  ), data= sites_standard)
+
+precis(mod1)
+
+mod2 <- quap(
+  alist(
+    size ~ dnorm(mu,sigma),
+    mu <- a[cid] + b[cid] * percent , 
+    a[cid] ~ dnorm(0,1) ,
+    b[cid] ~ dnorm(0,1) ,
+    sigma ~dexp(.1) 
+  ), data= sites_standard)
+
+precis(mod2, depth=2)
+
+posts = extract.samples(mod2)
+
+posts_table = tibble(a1 = posts$a[,1],
+                     a2 = posts$a[,2],
+                     b1 = posts$b[,1],
+                     b2 = posts$b[,2]) %>% 
+  mutate(iter = 1:nrow(.))
+
+post_preds = posts_table %>% 
+  filter(iter <= 100) %>%
+  expand_grid(percent = seq(-1.2, 2)) %>% 
+  mutate(size = a2 + b2*percent)
+
+
+#plot distribution
+ggplot(data = sites_standard %>% filter(site == "CARI"), aes(x = percent, y = size)) +
+  geom_point() +
+ facet_wrap(~site) +
+  geom_line(data = post_preds, aes(group = iter), alpha = 0.2) +
+  NULL
+
+ggplot(data = sites_standard %>% filter(site %in% c("CARI", "MCDI")), aes(x = percent, y = size)) +
+  geom_point() +
+  theme_bw() +
+  geom_line(data = post_preds, aes(group = iter), color="pink", alpha = 0.2,) +
+  facet_wrap(~site) +  # Create separate panels for each site
+  labs(title = "Distribution of Size by Percent for CARI and MCDI",
+       x = "Percent",
+       y = "Size")  # Add titles and labels
+```
+
+MCDI is a NEON site in Flint Hills region of Kansas south of Manhattan, KS. CARI is a NEON site in central Alaska at the CPCRW northeast of Fairbanks, AK. This examines the interaction of the size of  substrate present in total sample percent between sites MCDI and CARI. All data have been standardized to better examine an interaction between the percent of sediment described and their size class.
+
+mod2 has an 'a' prior of (0, 1) and a 'bP' prior of (0,1). This is because all of the data is standardized meaning that the data has been removed the units for analysis allowing us to better see potential trends among MCDI and CARI. Sigma is .1 , this helps us to understand the variability of the response variable size. The brackets present in mod2 show the interaction of mod1 at both MCDI and CARI.  
+
+mod2 states that at MCDI we can say with an 89% confidence that the mean change in sediment size is 1.12, and that the models data falls between 0.85 and 1.40 at MCDI. The standard deviation at MCDI is 0.17. While CARI also has a positive relationship it increases at a slower rate than MCDI. This is shown in the graphs but also precis table where 'b' mean value is 0.75 in CARI while it is 1.12 in MCDI. MCDI increases in sediment size 1.49 times faster than at CARI. We can say with 89% confidence that the mean change in sediment size at CARI falls between 0.56 and 0.94. Overall both sites show a positive relationship and as percent increases size also increases.
+
+This relationship makes biological sense as it should be positive. It should be a positive relationship as you go along the x-axis it encompasses more of the samples for that given site. The rate in which it increases tells us that MCDI has more larger substrate (cobbles) than CARI. CARI has more finer substrate than MCDI. Geologically speaking this also makes sense as CARI is located in Alaska while MCDI is located in Kansas. These streams have very different geological process affecting them as well as human activity, MAT, and MAP. CARI. We would expect this kind of substrate at CARI to have glacial till and for soil to be affected by permafrost thaws. This is hard to examine looking at NEON images of this site in particular due to the water level. At MCDI you can see that generally where they survey the stream it has high banks on one side and what appears to be gravel or small cobbles on the other bank.

@@ -1,0 +1,128 @@
+---
+title: "biol792ia3"
+author: "morgan hrivnak"
+date: "2024-11-14"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+```{r}
+library(rethinking)
+library(tidyverse)
+library(raster)
+library(here)
+
+df <- readRDS(here("alldata_wrangled.rds"))
+
+#assign non-numerical for percent_lessorequal
+df$percent_lessorequal <- as.numeric(df$percent_lessorequal)
+#filter out NA values
+df_clean <- df %>%
+  filter(!is.na(percent_lessorequal))
+#select only the necessary collumns
+df_cleaner <- df_clean %>% 
+  dplyr::select(percent_lessorequal, size, site, percent)
+  
+#select CARI and MCDI site
+selected_sites <- df_cleaner %>%
+  filter(site %in% c("MCDI", "CARI")) %>% 
+  mutate(percent_standard= standardize(percent)
+print(selected_sites)
+# #standardize selected sites
+# sites_standard <- selected_sites %>%
+#   mutate(across(where(is.numeric), scale))
+# head(sites_standard)
+
+
+#make variable into index
+selected_sites$cid <-ifelse(selected_sites$site == "MCDI", 1, 2)
+
+#main meat but make it gamma
+# mod1gamma <- ulam(
+#   alist(
+#     size ~ dgamma2(mu, scale), 
+#     log(mu) <- a + bP * percent ,
+#     a ~ dnorm(0, 1) ,
+#     bP ~ dnorm(0, 1) ,
+#     scale ~ dexp(10)
+#   ), 
+#   data= selected_sites, 
+#   iter= 2000, 
+#   chains = 4, 
+#   warmup =1000)
+# 
+# precis(mod1gamma)
+# 
+# mod2gamma <- ulam(
+#   alist(
+#     size ~ dgamma2(mu, scale),
+#     log(mu) <- a[cid] + b[cid] * percent , 
+#     a[cid] ~ dnorm(0,1) ,
+#     b[cid] ~ dnorm(0,1) ,
+#     scale ~ dexp (10) 
+#   ), 
+#   data= selected_sites, 
+#   iter= 2000, 
+#   chains = 4, 
+#   warmup =1000)
+# 
+# precis(mod2gamma, depth = 2)
+```
+
+
+
+```{r include=FALSE}
+mod3gamma <- ulam(
+  alist(
+    size ~ dgamma2(mu, scale),
+    log(mu) <- a[cid] + b[cid] * percent_standard , 
+    a[cid] ~ dnorm(3.5, 1) ,
+    b[cid] ~ dnorm(0.5, 1) ,
+    scale ~ dexp (1) 
+  ), 
+  data= selected_sites, 
+  iter= 2000, 
+  chains = 4, 
+  warmup =1000)
+
+precis(mod3gamma, depth = 2)
+
+```
+
+```{r}
+library(tidyverse)
+library(rethinking)
+posts = extract.samples(mod3gamma)
+
+posts_table = tibble(a1 = posts$a[,1],
+                     a2 = posts$a[,2],
+                     b1 = posts$b[,1],
+                     b2 = posts$b[,2]) %>% 
+  mutate(iter = 1:nrow(.))
+
+post_preds = posts_table %>% 
+  filter(iter <= 100) %>%
+  expand_grid(percent = seq(-1.2, 2)) %>% 
+  mutate(size = a2 + b2*percent)
+
+ggplot(data = selected_sites %>% filter(site %in% c("CARI", "MCDI")), aes(x = percent, y = size)) +
+  geom_point() +
+  geom_line(data = post_preds, aes(group = iter), color="pink", alpha = 0.2,) +
+  facet_wrap(~site) +  # Create separate panels for each site
+  labs(title = "Distribution of Size by Percent for CARI and MCDI",
+       x = "Percent",
+       y = "Size")  # Add titles and labels
+```
+
+
+
+MCDI is a NEON site in Flint Hills region of Kansas south of Manhattan, KS. CARI is a NEON site in central Alaska at the CPCRW northeast of Fairbanks, Alaska. This examines the interaction of the size of substrate present in total sample percent between sites MCDI and CARI. The data is not standardized and was put into a gamma distribution. The data falls into a gamma distribution because it is positive and continuous. 
+
+mod3gamma uses a mu of 35 and a scale 5 to simulate a gamma distribution. The scale of the distribution was 10 because there is a generally some dispersion of the data of the size of sediment. MCDI and CARI both have a positive relationship, MCDI mean change is 1.86 while CARI mean change is 1.50. We can say with 89% confidence that the mean change is between 1.59 and 2.12 at MCDI. We can say with 89% confidence that the mean change at CARI is between 1.22 and 1.77. rhat values are all 1 letting us know that the chains have likely converged. The scale parameter is 1.48 informing us that the model has a generally narrow, the model is confident about the scale estimate. We can say with 89% confidence that the scale is somewhere between 1.12 and 1.89. 
+
+This relationship makes biological sense as it should be positive. It should be a positive relationship as you go along the x-axis it encompasses more of the samples for that given site. The rate in which it increases tells us that MCDI has more larger substrate (cobbles) than CARI. CARI has more finer substrate than MCDI. Geologically speaking this also makes sense as CARI is located in Alaska while MCDI is located in Kansas. These streams have very different geological process affecting them as well as human activity, MAT, and MAP. CARI. We would expect this kind of substrate at CARI to have glacial till and for soil to be affected by permafrost thaws. This is hard to examine looking at NEON images of this site in particular due to the water level. At MCDI you can see that generally where they survey the stream it has high banks on one side and what appears to be gravel or small cobbles on the other bank.
+
+
+
+

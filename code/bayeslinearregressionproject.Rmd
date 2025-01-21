@@ -1,0 +1,85 @@
+---
+title: "linearregression"
+author: "morgan hrivnak"
+date: "2024-10-02"
+output: html_document
+---
+load packages
+```{r}
+library(rethinking)
+library(tidyverse)
+library(raster)
+library(neonUtilities)
+library(tidyr)
+library(dplyr)
+```
+data
+```{r}
+p <- loadByProduct(dpID="DP4.00131.001",
+                   site=c("CUPE"),
+                   startdate="2017-01",
+                   enddate="2021-12",
+                   package="expanded")
+assign("has_internet_via_proxy", TRUE, environment(curl::has_internet))
+
+x <- p$geo_pebbleCount
+
+df <- x %>% 
+  select(siteID, pebbleCountNumber, pebbleSize, habitatType, endDate) %>% 
+  separate(col = pebbleSize, into = c("numbers", "category"), sep = "mm: ") %>% 
+  separate(col = numbers, into = c("min", "max"), sep = " - ") %>% 
+  mutate(max = case_when(grepl("<", min) ~ min,
+                         TRUE ~ max),
+         min = case_when(grepl("<", min) ~ NA,
+                         TRUE ~ min)) %>% 
+  mutate(min = parse_number(min)) %>% 
+  mutate(max = parse_number(max)) %>% 
+  separate(col = endDate, into = c("year", "month/date"), sep = "-0")
+
+saveRDS(df, file="cupedf")
+
+```
+minimal cobble size at CUPE site at different years
+```{r}
+cupedf = readRDS(file = "cupedf")
+
+cupedf$year <- as.numeric(cupedf$year)
+
+cupedf <- cupedf %>% 
+  drop_na(min)
+
+cupe_lr <- quap(
+  alist(
+    min ~ dnorm(mu, sigma),
+    mu <- a + bA * year ,
+    a ~ dnorm(22, 20) ,
+    bA ~ dnorm(0, 20) ,
+    sigma ~ dexp(1)
+  ), data= cupedf)
+
+precis(cupe_lr)
+
+post <- extract.samples(cupe_lr, n = 1000)
+
+plot(cupedf$year, cupedf$min,
+     xlim = range(cupedf$year), ylim = range(cupedf$min),
+     xlab = "year", ylab = "min")
+for(i in 1:20)
+  curve(post$a[i] + post$b[i] * (x - mean(cupedf$year)),
+        col = col.alpha("darkblue", 0.3), add = TRUE)
+
+
+```
+
+This linear regression shows the relationship between the minimum pebble size sampled at NEON site CUPE from the years of 2017-2021. NEON stands for the national ecological observatory network, this data is taken from the data product DP4.00131.001 (stream morphology map) product. This product gives raw data of general morphology of 24 different wadeable streams from Alaska to Puerto Rico. There is no data available for 2019. It is important to note that this data does not include the data falling into Wolman pebble count size class of sand or the boulder categories due to these values being <2 (sand) and >256 (boulders.) My research is looking to see if there is a relationship between percent of certain pebble size class in a stream the individual size distribution of macroinvertebrates across different streams observing the relationship of these two variables as percent of finer sediment increases and decreases. 
+
+a prior is (22, 20) because most of the data falls into the classification of medium and coarse gravel. With a mean of 22 this minimum value represents what this stream in Puerto Rico's substrate is primarily consistent of. A standard deviation of 20 allows most of the data to be included because substrate has such a wide range of minimum size ranges for pebble size classes as the largest minimum recorded size class in this data set was 180. 
+
+bA prior is (0,20) because it is showing an estimated regression coefficient that is recalculated with a mean of 0 and a standard deviation of 20. This allows us to draw a comparison between independent variables to show which has the most influence on the dependent variable. Similarly to why the standard deviation was 20 in the a prior the bA prior has the same standard deviation due to the varying size classes. 
+
+sigma is 1 showing a confidence of 1 allowing us to know the degree of uncertainty. 
+
+The reason why this linear regression does not have data points outside of the line is because fundamentally this data all falls within the regression as this standard of Wolman pebble count assigns pebbles into size classes. The line of regression is still true but data points do not exist outside of this trend, if they did they would not be included in the Wolman pebble count to begin with. 
+
+
+

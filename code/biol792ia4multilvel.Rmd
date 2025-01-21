@@ -1,0 +1,120 @@
+---
+title: "biol792ia4multilevel"
+author: "morgan hrivnak"
+date: "2024-12-05"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r load packages, echo=TRUE}
+#load packages
+library(rethinking)
+library(tidyverse)
+library(raster)
+library(dplyr)
+library(here)
+```
+
+```{r data and modifications to table, echo=TRUE}
+df <- readRDS(here("alldata_wrangled.rds"))
+
+#assign non-numerical for percent_lessorequal
+df$percent_lessorequal <- as.numeric(df$percent_lessorequal)
+#filter out NA values
+df_clean <- df %>%
+  filter(!is.na(percent_lessorequal))
+#select only the necessary collumns
+df_cleaner <- df_clean %>% 
+  dplyr::select(percent_lessorequal, size, site, percent)
+#select CARI and MCDI sites and standardize the x axis
+selected_sites <- df_cleaner %>%
+  filter(site %in% c("MCDI", "CARI")) %>% 
+  mutate(percent_standard= standardize(percent))
+print(selected_sites) 
+
+
+
+#make variable into index
+selected_sites$cid <-ifelse(selected_sites$site == "MCDI", 1, 2)
+
+```
+
+```{r gamma.model, eval=FALSE, include=FALSE}
+gamma1 <- ulam(
+  alist(
+    size ~ dgamma2(mu, scale),
+    log(mu) <- a[cid] + b[cid] * percent_standard , 
+    a[cid] ~ dnorm(3.5, 1) ,
+    b[cid] ~ dnorm(0.5, 1) ,
+    scale ~ dexp (1) 
+  ), 
+  data= selected_sites, 
+  iter= 2000, 
+  chains = 4, 
+  warmup =1000)
+
+precis(mod3gamma, depth = 2)
+```
+
+```{r mlm gamma model, echo=TRUE, message=FALSE, warning=FALSE}
+mlmgamma1 <- ulam(
+  alist(
+    size ~ dgamma2(mu, scale) ,
+    log(mu) <- a_mlm[cid] + b_mlm[cid] * percent_standard ,
+    a_mlm[cid] ~ dnorm(a, scale_alpha),
+    b_mlm[cid] ~ dnorm(b, scale_beta) ,
+    a ~ dnorm(3.5, 1) ,
+    b ~ dnorm(0.5, 1) ,
+    scale ~ dexp(1) ,
+    scale_alpha ~ dexp(1) ,
+    scale_beta ~ dexp(1)
+ ), 
+  data = selected_sites ,
+  iter = 2000, 
+  chains = 4 ,
+  warmup = 1000)
+
+```
+
+```{r precismlmgamma1, echo=TRUE}
+precis(mlmgamma1, depth= 2)
+```
+
+```{r postpreds, echo=TRUE}
+posts = extract.samples(mlmgamma1)
+
+posts_table = tibble(a1 = posts$a_mlm[,1],
+                     a2 = posts$a_mlm[,2],
+                     b1 = posts$b_mlm[,1],
+                     b2 = posts$b_mlm[,2]) %>% 
+  mutate(iter = 1:nrow(.))
+
+post_preds = posts_table %>% 
+  filter(iter <= 100) %>%
+  expand_grid(percent_standard = seq(min(selected_sites$percent_standard), 
+                                     max(selected_sites$percent_standard),
+              length.out = 20)) %>% 
+  mutate(size = exp(a2 + b2*percent_standard))
+```
+
+```{r plot, echo=TRUE}
+ggplot(data =selected_sites %>% filter(site %in% c("CARI", "MCDI")), aes(x = percent_standard, y = size)) +
+  geom_point() +
+  theme_bw() +
+ geom_line(data = post_preds, aes(group = iter), color="pink", alpha = 0.2) + #this needs to change for the data
+facet_wrap(~site) +  # Create separate panels for each site
+  labs(title = "Multi-level Gamma Distribution of Size by Percent for CARI and MCDI",
+       x = "Percent (standard)",
+       y = "Size") 
+```
+
+MCDI is a NEON site in Flint Hills region of Kansas south of Manhattan, KS. CARI is a NEON site in central Alaska at the CPCRW northeast of Fairbanks, Alaska. This examines the interaction of the size of substrate present in total sample percent between sites MCDI and CARI. The data is not standardized and was put into a gamma distribution. The x-axis percent was standardized to better examine the trend in data. The data falls into a gamma distribution because it is positive and continuous. A multi-level model was used to increase the sample size without increasing the number of observations as the data was pulled from NEON data base, it allows us to further improve the model compared to a regular MCMC chain.
+
+mlmgamma1 uses a multi-level gamma distribution to examine the trends of CARI and MCDI. The slope has a mu of 3.5 and a scale of 1 because these are the exponent of that best fits the data set. The multi-level gamma is logged so the priors need to reflect that relationship in their calculation. The intercept has a mu of 0.5 and a scale of 1 for a similar reason to the  MCDI has a mean intercept of 3.49 (CL89% 3.31-3.66) and a mean slope of 1.08 (CL89% 0.92-1.26). CARI has a mean intercept of 2.97 (CL89% 2.78-3.16) and a mean slope of 0.98 (CL89% 0.83-1.13). 
+
+This relationship makes biological sense as it should be positive. It should be a positive relationship as you go along the x-axis it encompasses more of the samples for that given site. The rate in which it increases tells us that MCDI has more larger substrate (cobbles) than CARI. CARI has more finer substrate than MCDI. Geologically speaking this also makes sense as CARI is located in Alaska while MCDI is located in Kansas. These streams have very different geological process affecting them as well as human activity, MAT, and MAP. CARI. We would expect this kind of substrate at CARI to have glacial till and for soil to be affected by permafrost thaws. This is hard to examine looking at NEON images of this site in particular due to the water level. At MCDI you can see that generally where they survey the stream it has high banks on one side and what appears to be gravel or small cobbles on the other bank. MCDI is characterized as a metavolcanic bedrock while CARI is characterized as Birtch Creek Schist. Although both of them are composed of silt CARI has soils that are typically silty alluvium and are subject to permafrost layers while MCDI has Ivan silt loam that is prone to occasional flooding. MCDI is typical upland headwaters stream while CARI is a second-order perennial stream. The two streams are not only geologically and hydrologically different from one another but their soils and regular disturbance events are drastically different from one another. 
+
+
+
